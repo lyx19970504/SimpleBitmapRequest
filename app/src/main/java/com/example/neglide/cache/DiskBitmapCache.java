@@ -6,65 +6,67 @@ import android.graphics.BitmapFactory;
 
 import com.example.neglide.Application.MyApplication;
 import com.example.neglide.BitmapRequest;
+import com.jakewharton.disklrucache.DiskLruCache;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 
-public class DiskBitmapCache implements BitmapCache {
+public class DiskBitmapCache{
 
-
-    private static volatile DiskBitmapCache diskBitmapCache;
-    
-    private File cacheFile;
-    private File file;
-
+    private static DiskBitmapCache sDiskBitmapCache;
+    private static DiskLruCache sDiskLruCache;
 
     public static DiskBitmapCache getInstance(){
-        if(diskBitmapCache == null){
-            diskBitmapCache = new DiskBitmapCache();
+        if(sDiskBitmapCache == null){
+            sDiskBitmapCache = new DiskBitmapCache();
         }
-        return diskBitmapCache;
+        return sDiskBitmapCache;
     }
 
     public DiskBitmapCache(){
-        file = new File(MyApplication.getContext().getCacheDir(),"my_cache");
-        if(!file.exists()){
-            file.mkdirs();
+        File cacheDir = MyApplication.getContext().getExternalCacheDir();
+        long maxCacheSize = 50 * 1024 * 1024;  //最大缓存为50M
+        try {
+            sDiskLruCache = DiskLruCache.open(cacheDir,1, 1, maxCacheSize);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
-    @Override
-    public void put(BitmapRequest request, Bitmap bitmap) {
-        cacheFile = new File(file,request.getUrlMD5());
-        if(!cacheFile.exists()) {
-            FileOutputStream outputStream;
-            try {
-                outputStream = new FileOutputStream(cacheFile);
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
+    public void put(BitmapRequest request,Bitmap bitmap){
+        try {
+            DiskLruCache.Editor editor = sDiskLruCache.edit(request.getUrlMD5());
+            OutputStream outputStream = editor.newOutputStream(0);
+            bitmap.compress(Bitmap.CompressFormat.PNG,100,outputStream);
+            editor.commit();
+            sDiskLruCache.flush();
+            outputStream.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public Bitmap get(BitmapRequest request){
+        try {
+            DiskLruCache.Snapshot snapshot = sDiskLruCache.get(request.getUrlMD5());
+            if(snapshot != null){
+                return BitmapFactory.decodeStream(snapshot.getInputStream(0));
             }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    public void remove(BitmapRequest request){
+        try {
+            sDiskLruCache.remove(request.getUrlMD5());
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
-    @Override
-    public Bitmap get(BitmapRequest request) {
-        Bitmap bitmap = null;
-        if(file.exists()) {
-            File requestFile = new File(file, request.getUrlMD5());
-            if (requestFile.exists()) {
-                bitmap = BitmapFactory.decodeFile(requestFile.getAbsolutePath());
-            }
-        }
-        return bitmap;
-    }
-
-    @Override
-    public void remove(BitmapRequest request) {
-        File requestFile = new File(file,request.getUrlMD5());
-        if(requestFile.exists()){
-            requestFile.delete();
-        }
-    }
 }
